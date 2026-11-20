@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTD — Grand Theft Dhaka</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;overflow:hidden;background:#101820;color:#fff;font:15px system-ui,Segoe UI,Arial}
+#game{display:block;width:100vw;height:100vh}#hud{position:fixed;inset:0;pointer-events:none;padding:18px;display:flex;justify-content:space-between;align-items:flex-start}
+.panel{background:#07131acc;border:1px solid #ffffff26;border-radius:12px;padding:12px 15px;box-shadow:0 8px 28px #0005;backdrop-filter:blur(6px)}#brand{font-weight:900;font-size:22px;letter-spacing:2px}#brand small{display:block;font-size:10px;font-weight:500;letter-spacing:3px;color:#9db6c5}
+#mission{max-width:300px;margin-top:12px}#mission b{color:#9ff5c4}#speed{font-size:26px;font-weight:800}#speed small{font-size:12px;color:#a8c1cf}
+#map{width:160px;height:160px;border-radius:10px;border:1px solid #fff5;background:#08151b;margin-top:10px}
+#help{position:fixed;bottom:18px;left:18px;pointer-events:none;font-size:12px;color:#e1e8ec;background:#07131acc;padding:10px 13px;border-radius:10px;line-height:1.7}
+#toast{position:fixed;left:50%;top:18%;transform:translate(-50%,-10px);opacity:0;transition:.25s;background:#102c24;border:1px solid #9ff5c4;padding:10px 16px;border-radius:10px;pointer-events:none}#toast.show{opacity:1;transform:translate(-50%,0)}
+#start{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(130deg,#06131bdc,#091b26cc);z-index:4}#start .card{max-width:560px;margin:20px;text-align:center;padding:35px;border:1px solid #ffffff25;border-radius:18px;background:#0a1822ee;box-shadow:0 20px 80px #0008}
+h1{font-size:54px;margin:0;letter-spacing:5px}h1 span{color:#9ff5c4}#start p{color:#c0d0d9;line-height:1.6}button{border:0;border-radius:9px;background:#9ff5c4;color:#092017;font-weight:800;padding:13px 24px;font-size:16px;cursor:pointer}button:hover{filter:brightness(1.1)}
+#pause{display:none;position:fixed;inset:0;background:#04101bcc;place-items:center;font-size:34px;font-weight:800;z-index:3}
+@media(max-width:600px){#map{width:120px;height:120px}#mission{max-width:210px}#help{font-size:10px}h1{font-size:40px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="start"><div class="card"><h1>G<span>T</span>D</h1><div style="letter-spacing:4px;color:#9ff5c4">GRAND THEFT DHAKA</div><p>Explore a stylized neighbourhood inspired by Mugda, Dhaka. Walk around, drive, discover landmarks and complete delivery checkpoints.</p><p><b>WASD</b> move / drive · <b>E</b> enter or exit · <b>Shift</b> sprint · <b>Space</b> brake · <b>P</b> pause</p><button id="enter">ENTER THE CITY</button></div></div>
+<div id="pause">PAUSED</div>
+<div id="hud"><div><div class="panel"><div id="brand">GTD <small>GRAND THEFT DHAKA</small></div><div id="mission" class="panel"> <b>STREET EXPLORER</b><br>Find the glowing green checkpoints.</div></div></div><div style="text-align:right"><div class="panel"><div id="speed">0 <small>KM/H</small></div><div id="zone">MUGDA DISTRICT</div></div><canvas id="map" width="160" height="160"></canvas></div></div>
+<div id="help">WASD — MOVE / DRIVE &nbsp; SHIFT — SPRINT<br>E — ENTER / EXIT VEHICLE &nbsp; SPACE — BRAKE<br>P — PAUSE &nbsp; MOUSE — LOOK AROUND</div><div id="toast"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const canvas=document.querySelector('#game'),renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x91c9df);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x91c9df);scene.fog=new THREE.Fog(0x91c9df,95,330);
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,500);
+scene.add(new THREE.HemisphereLight(0xe7f7ff,0x536244,2.0));
+const sun=new THREE.DirectionalLight(0xfff1cf,2.4);sun.position.set(-70,100,60);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
+const mat=(c)=>new THREE.MeshStandardMaterial({color:c,roughness:.85});
+const grass=mat(0x5b8655),road=mat(0x303a40),sidewalk=mat(0x9b9d96),line=mat(0xe5dfc8),buildingMats=[0xbba68d,0xc8b7a1,0x9aa9ad,0xd1c0a6,0x9b9488,0xaaa0b0].map(mat);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(600,600),grass);ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+const obstacles=[],roads=[];
+function box(x,y,z,w,h,d,m,collide=false){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y+h/2,z);o.castShadow=true;o.receiveShadow=true;scene.add(o);if(collide)obstacles.push({x,z,w,d});return o}
+function roadStrip(x,z,w,d){box(x,0.02,z,w,.08,d,road);roads.push({x,z,w,d});}
+roadStrip(0,0,18,500);roadStrip(0,0,500,18);
+for(let i=-240;i<=240;i+=40){roadStrip(i,0,12,500);roadStrip(0,i,500,12);}
+function stripe(x,z,w,d){box(x,.09,z,w,.03,d,line)}
+for(let i=-240;i<240;i+=12){stripe(i,0,5,.22);stripe(0,i,.22,5)}
+// block buildings, arranged in road-grid gaps
+for(let gx=-220;gx<=220;gx+=40)for(let gz=-220;gz<=220;gz+=40){
+ if(Math.abs(gx)<25||Math.abs(gz)<25)continue;
+ let x=gx+((gx/40%2)?5:-5),z=gz+((gz/40%2)?5:-5),w=18+Math.random()*9,d=18+Math.random()*9,h=9+Math.random()*30;
+ box(x,z*0+0,z,w,h,d,buildingMats[Math.floor(Math.random()*buildingMats.length)],true);
+ // windows as small facade accents
+ const win=mat(0x5b8190);for(let yy=4;yy<h-2;yy+=4)for(let xx=-w/2+3;xx<w/2-2;xx+=4)box(x+xx,yy,z-d/2-.06,1.4,1.5,.08,win);
+}
+// landmark cluster
+function labelSprite(text){const c=document.createElement('canvas');c.width=512;c.height=128;const ctx=c.getContext('2d');ctx.fillStyle='#142a32';ctx.fillRect(0,0,512,128);ctx.strokeStyle='#9ff5c4';ctx.lineWidth=5;ctx.strokeRect(4,4,504,120);ctx.font='bold 42px Arial';ctx.textAlign='center';ctx.fillStyle='#ffffff';ctx.fillText(text,256,80);const tex=new THREE.CanvasTexture(c);const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex}));s.scale.set(18,4.5,1);return s}
+function landmark(x,z,name,color=0xc2b09a){box(x,0,z,22,14,18,mat(color),true);let s=labelSprite(name);s.position.set(x,17,z);scene.add(s)}
+landmark(55,55,'MUGDA COMMUNITY',0xb7a58c);landmark(-55,-55,'LOCAL MARKET',0xc9aa76);landmark(55,-55,'MUGDA CLINIC',0x9db8ad);landmark(-55,55,'NEIGHBOURHOOD',0xb0a8bd);
+// trees & lampposts
+for(let i=0;i<90;i++){let x=(Math.random()-.5)*460,z=(Math.random()-.5)*460;if(Math.abs(x%40)<12||Math.abs(z%40)<12)continue;box(x,0,z,1.1,4,1.1,mat(0x765139));let crown=new THREE.Mesh(new THREE.SphereGeometry(2.6,8,7),mat(0x38774a));crown.position.set(x,5,z);crown.castShadow=true;scene.add(crown)}
+for(let i=-220;i<=220;i+=40){for(let side of [-1,1]){let x=i,z=side*11;box(x,0,z,.35,5,.35,mat(0x59646a));box(x,5,z,2,.25,.25,mat(0xf0d49a));}}
+// Player character
+const player=new THREE.Group();scene.add(player);const body=new THREE.Mesh(new THREE.BoxGeometry(1,1.5,.55),mat(0x276cbd));body.position.y=1.65;body.castShadow=true;player.add(body);const head=new THREE.Mesh(new THREE.SphereGeometry(.38,12,10),mat(0xc99570));head.position.y=2.65;player.add(head);const legs=new THREE.Mesh(new THREE.BoxGeometry(.65,1,.45),mat(0x303747));legs.position.y=.5;player.add(legs);
+player.position.set(3,0,3);
+// car
+const car=new THREE.Group();scene.add(car);box(0,0,0,1,1,1,mat(0x000000)); // placeholder mesh is removed below
+scene.remove(scene.children[scene.children.length-1]);
+const carbody=new THREE.Mesh(new THREE.BoxGeometry(3.6,1.1,6),mat(0x1b9b8c));carbody.position.y=1;car.add(carbody);const cabin=new THREE.Mesh(new THREE.BoxGeometry(2.5,1.1,2.8),mat(0x263c49));cabin.position.set(0,1.9,-.3);car.add(cabin);
+for(let x of [-1.5,1.5])for(let z of [-2,2]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.65,.65,.45,16),mat(0x151719));wheel.rotation.z=Math.PI/2;wheel.position.set(x,.55,z);car.add(wheel)}
+car.position.set(10,0,10);car.visible=false;
+let inCar=false,paused=false,angle=0,velocity=0,checkpoint=0,toastTimer=0;
+const checkpoints=[[-40,0],[-40,-40],[40,-40],[40,40],[0,80]];
+const cpMeshes=[];
+for(let [x,z] of checkpoints){const ring=new THREE.Mesh(new THREE.TorusGeometry(3,.25,8,24),mat(0x9ff5c4));ring.rotation.x=Math.PI/2;ring.position.set(x,.25,z);scene.add(ring);cpMeshes.push(ring)}
+function notify(t){const el=document.querySelector('#toast');el.textContent=t;el.classList.add('show');toastTimer=2.5}
+function updateMission(){document.querySelector('#mission').innerHTML='<b>STREET EXPLORER</b><br>'+(checkpoint>=checkpoints.length?'Tour completed! Explore freely.':'Checkpoint '+(checkpoint+1)+' of '+checkpoints.length+' — head to the glowing marker.')}
+updateMission();
+const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key.toLowerCase()==='p'){paused=!paused;document.querySelector('#pause').style.display=paused?'grid':'none'}if(e.key.toLowerCase()==='e'&&!paused)toggleCar();if([' ','ArrowUp','ArrowDown'].includes(e.key))e.preventDefault()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+canvas.addEventListener('click',()=>canvas.requestPointerLock?.());document.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas&&!paused)angle-=e.movementX*.0025});
+function toggleCar(){if(inCar){player.position.copy(car.position);player.position.x+=4;player.visible=true;car.visible=false;inCar=false;velocity=0;notify('You left the car.')}else if(player.position.distanceTo(car.position)<7){car.visible=true;player.visible=false;inCar=true;notify('Vehicle mode enabled.')}}document.querySelector('#enter').onclick=()=>{document.querySelector('#start').style.display='none';notify('Welcome to Mugda. Find the first marker!')};
+const camOffset=new THREE.Vector3();
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function collide(pos){return obstacles.some(o=>Math.abs(pos.x-o.x)<o.w/2+1.1&&Math.abs(pos.z-o.z)<o.d/2+1.1)}
+const minimap=document.querySelector('#map'),ctx=minimap.getContext('2d');
+function drawMap(){ctx.clearRect(0,0,160,160);ctx.fillStyle='#365c42';ctx.fillRect(0,0,160,160);ctx.fillStyle='#455159';for(let i=0;i<160;i+=32){ctx.fillRect(i,0,10,160);ctx.fillRect(0,i,160,10)}ctx.fillStyle='#9ff5c4';for(let [x,z] of checkpoints.slice(checkpoint)){ctx.beginPath();ctx.arc(80+x/4,80+z/4,3,0,Math.PI*2);ctx.fill()}let p=inCar?car.position:player.position;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(80+p.x/4,80+p.z/4,4,0,Math.PI*2);ctx.fill()}
+function loop(){requestAnimationFrame(loop);if(paused)return;const dt=Math.min(clock.getDelta(),.04);let obj=inCar?car:player;
+if(inCar){if(keys.w)velocity+=18*dt;if(keys.s)velocity-=14*dt;if(keys[' '])velocity*=Math.pow(.08,dt);velocity*=Math.pow(.985,dt);velocity=clamp(velocity,-12,35);if(keys.a)car.rotation.y+=2.1*dt*(velocity/12);if(keys.d)car.rotation.y-=2.1*dt*(velocity/12);let forward=new THREE.Vector3(Math.sin(car.rotation.y),0,Math.cos(car.rotation.y));let next=car.position.clone().add(forward.multiplyScalar(velocity*dt));if(!collide(next))car.position.copy(next);else velocity*=.2;}
+else{let forward=new THREE.Vector3(Math.sin(angle),0,Math.cos(angle)),right=new THREE.Vector3(Math.cos(angle),0,-Math.sin(angle));let move=new THREE.Vector3();if(keys.w)move.add(forward);if(keys.s)move.sub(forward);if(keys.a)move.sub(right);if(keys.d)move.add(right);if(move.length()>0){move.normalize().multiplyScalar((keys.shift?12:7)*dt);let next=player.position.clone().add(move);if(!collide(next))player.position.copy(next);player.rotation.y=angle;}}
+let target=inCar?car.position:player.position;if(checkpoint<checkpoints.length&&target.distanceTo(new THREE.Vector3(checkpoints[checkpoint][0],0,checkpoints[checkpoint][1]))<6){checkpoint++;updateMission();notify(checkpoint===checkpoints.length?'Route complete! Free roam unlocked.':'Checkpoint reached!');}
+camOffset.set(Math.sin(angle)*-13,7,Math.cos(angle)*-13);camera.position.copy(target).add(camOffset);camera.lookAt(target.clone().add(new THREE.Vector3(0,1.5,0)));document.querySelector('#speed').innerHTML=Math.round(Math.abs(velocity)*3.6)+' <small>KM/H</small>';drawMap();if(toastTimer>0){toastTimer-=dt;if(toastTimer<=0)document.querySelector('#toast').classList.remove('show')}}
+const clock=new THREE.Clock();loop();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+renderer.setAnimationLoop(()=>renderer.render(scene,camera));
+</script>
+</body>
+</html>
